@@ -55,18 +55,17 @@ async def load_model_bg():
     model_status = "loading"
     try:
         # A10G Configuration (24GB VRAM)
-        # Full FP16 model is ~30GB -> Too big for 24GB.
-        # 4-bit is ~8GB -> Fits easily but lower quality.
-        # 8-bit is ~15GB -> PERFECT FIT. High quality, leaves 9GB headroom for OS/Activations.
+        # 8-bit quantization (~15GB)
+        # device_map="balanced" is required (auto not supported by this pipeline)
         
-        logger.info("Loading Qwen-Image-Edit-2509 in 8-bit (Optimized for A10G)...")
+        logger.info("Loading Qwen-Image-Edit-2509 in 8-bit (Optimized for A10G, Balanced)...")
         
         pipe = await asyncio.to_thread(
             QwenImageEditPlusPipeline.from_pretrained,
             "Qwen/Qwen-Image-Edit-2509",
             torch_dtype=torch.float16,
-            device_map="auto",
-            load_in_8bit=True # Key optimization for A10G
+            device_map="balanced", # Changed from 'auto' to 'balanced'
+            load_in_8bit=True
         )
         
         pipeline = pipe
