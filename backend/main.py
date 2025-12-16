@@ -8,7 +8,6 @@ from PIL import Image
 import io
 import logging
 import asyncio
-import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,7 +33,7 @@ async def load_model_bg():
         # Define loading args
         kwargs = {
             "torch_dtype": torch.float16 if device != "cpu" else torch.float32,
-            "low_cpu_mem_usage": True, # Optimize memory loading
+            "low_cpu_mem_usage": True, 
         }
         
         # Run synchronous loading in a separate thread
@@ -44,8 +43,12 @@ async def load_model_bg():
             **kwargs
         )
         
-        # Move to device
-        pipe.to(device)
+        # Use CPU Offload for memory efficiency if on CUDA
+        if device == "cuda":
+            logger.info("Enabling model CPU offload for memory efficiency...")
+            pipe.enable_model_cpu_offload()
+        else:
+            pipe.to(device)
         
         pipeline = pipe
         model_status = "ready"
