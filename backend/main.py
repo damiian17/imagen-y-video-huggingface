@@ -4,7 +4,6 @@ from fastapi.responses import Response, JSONResponse
 from contextlib import asynccontextmanager
 import torch
 from diffusers import QwenImageEditPlusPipeline
-# Removed BitsAndBytesConfig import to avoid temptation/confusion
 from PIL import Image, ImageOps
 import io
 import logging
@@ -55,21 +54,19 @@ async def load_model_bg():
     logger.info(f"Background loading started. Target device context: {device}")
     model_status = "loading"
     try:
-        # Use direct kwargs for 4-bit loading. 
-        # This bypasses the 'PipelineQuantizationConfig' type check in some diffusers versions
-        # by letting the underlying model loader handle it via **kwargs.
+        # A10G Configuration (24GB VRAM)
+        # Full FP16 model is ~30GB -> Too big for 24GB.
+        # 4-bit is ~8GB -> Fits easily but lower quality.
+        # 8-bit is ~15GB -> PERFECT FIT. High quality, leaves 9GB headroom for OS/Activations.
         
-        logger.info("Loading Qwen-Image-Edit-2509 using NF4 quantization (Implicit kwargs + Balanced Map)...")
+        logger.info("Loading Qwen-Image-Edit-2509 in 8-bit (Optimized for A10G)...")
         
         pipe = await asyncio.to_thread(
             QwenImageEditPlusPipeline.from_pretrained,
             "Qwen/Qwen-Image-Edit-2509",
             torch_dtype=torch.float16,
-            device_map="balanced", # Changed from "auto" to "balanced"
-            load_in_4bit=True,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.float16,
-            bnb_4bit_use_double_quant=True
+            device_map="auto",
+            load_in_8bit=True # Key optimization for A10G
         )
         
         pipeline = pipe
