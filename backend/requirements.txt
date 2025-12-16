@@ -1,7 +1,9 @@
-diffusers
-transformers
-accelerate
-torch
+torch>=2.4.0
+diffusers>=0.30.0
+transformers>=4.44.2
+accelerate>=0.34.0
+bitsandbytes>=0.43.3
+peft
 torchvision
 fastapi
 uvicorn
@@ -9,5 +11,7 @@ python-multipart
 pillow
 scipy
 safetensors
+sentencepiece
+protobuf
 opencv-python-headless
 numpy
