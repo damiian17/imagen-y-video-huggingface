@@ -4,12 +4,13 @@ from fastapi.responses import Response, JSONResponse
 from contextlib import asynccontextmanager
 import torch
 from diffusers import QwenImageEditPlusPipeline
-from PIL import Image, ImageOps
+from PIL import Image
 import io
 import logging
 import asyncio
 import os
 import traceback
+import requests
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,23 +30,55 @@ def get_device():
     else:
         return "cpu"
 
+def download_file(url, dest_path):
+    try:
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+        with open(dest_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+        logger.info(f"Downloaded {dest_path} from {url}")
+        return True
+    except Exception as e:
+        logger.error(f"Failed to download {url}: {e}")
+        return False
+
 def load_reference_images():
-    """Loads reference images into memory."""
+    """Loads reference images into memory. Downloads them if missing."""
     global REFERENCE_IMAGES
     try:
-        # Expected paths - ensure these files exist in Docker container
-        refs = {
-            "hollywood": "assets/ref_hollywood.png",
-            "natural": "assets/ref_natural.png",
-            "alignment": "assets/ref_alignment.png"
+        # Configuration for assets
+        assets = {
+            "hollywood": {
+                "path": "assets/ref_hollywood.png",
+                "url": "https://raw.githubusercontent.com/damiian17/frontend-creador-sonrisas/main/public/assets/hollywood.png"
+            },
+            "natural": {
+                "path": "assets/ref_natural.png",
+                "url": "https://raw.githubusercontent.com/damiian17/frontend-creador-sonrisas/main/public/assets/natural.png"
+            },
+            "alignment": {
+                "path": "assets/ref_alignment.png",
+                "url": "https://raw.githubusercontent.com/damiian17/frontend-creador-sonrisas/main/public/assets/alignment.png"
+            }
         }
-        for style, path in refs.items():
+        
+        for style, config in assets.items():
+            path = config["path"]
+            # Try to download if missing
+            if not os.path.exists(path):
+                logger.info(f"Asset missing: {path}. Attempting download...")
+                download_file(config["url"], path)
+            
+            # Load if exists (pre-existing or just downloaded)
             if os.path.exists(path):
                 img = Image.open(path).convert("RGB")
                 REFERENCE_IMAGES[style] = img
                 logger.info(f"Loaded reference image for {style}")
             else:
-                logger.warning(f"Reference image not found: {path}")
+                logger.warning(f"Reference image could not be loaded: {path}")
+
     except Exception as e:
         logger.error(f"Error loading reference images: {e}")
 
@@ -55,10 +88,6 @@ async def load_model_bg():
     logger.info(f"Background loading started. Target device context: {device}")
     model_status = "loading"
     try:
-        # A10G Configuration (24GB VRAM)
-        # 8-bit quantization (~15GB)
-        # device_map="balanced" is required (auto not supported by this pipeline)
-        
         logger.info("Loading Qwen-Image-Edit-2509 in 8-bit (Optimized for A10G, Balanced)...")
         
         pipe = await asyncio.to_thread(
@@ -129,7 +158,6 @@ async def edit_smile(image: UploadFile = File(...), style: str = Form(...)):
             "negative_prompt": NEGATIVE_PROMPT,
             "num_inference_steps": 30,
             "guidance_scale": 4.5,
-            # "image_guidance_scale": 1.6 # REMOVED: Not supported by current pipeline version
         }
 
         if style in REFERENCE_IMAGES:
