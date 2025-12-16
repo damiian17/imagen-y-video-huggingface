@@ -1,0 +1,13 @@
+diffusers
+transformers
+accelerate
+torch
+torchvision
+fastapi
+uvicorn
+python-multipart
+pillow
+scipy
+safetensors
+sentencepiece
+protobuf
