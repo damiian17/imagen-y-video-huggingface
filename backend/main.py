@@ -4,7 +4,7 @@ from fastapi.responses import Response, JSONResponse
 from contextlib import asynccontextmanager
 import torch
 from diffusers import QwenImageEditPlusPipeline
-from transformers import BitsAndBytesConfig
+# Removed BitsAndBytesConfig import to avoid temptation/confusion
 from PIL import Image, ImageOps
 import io
 import logging
@@ -55,29 +55,21 @@ async def load_model_bg():
     logger.info(f"Background loading started. Target device context: {device}")
     model_status = "loading"
     try:
-        # Simplified Quantization approach to avoid type check error
-        # Instead of passing the config object mainly, we can try passing the dict or reliance on device_map auto with boolean
+        # Use direct kwargs for 4-bit loading. 
+        # This bypasses the 'PipelineQuantizationConfig' type check in some diffusers versions
+        # by letting the underlying model loader handle it via **kwargs.
         
-        # However, to use NF4 specifically, we need the config.
-        # If 'quantization_config' param fails, we pass the arguments that transformers.from_pretrained accepts directly
-        # because the pipeline forwards kwargs to the components.
+        logger.info("Loading Qwen-Image-Edit-2509 using NF4 quantization (Implicit kwargs)...")
         
-        quant_config = BitsAndBytesConfig(
-            load_in_4bit=True,
-            bnb_4bit_compute_dtype=torch.float16,
-            bnb_4bit_quant_type="nf4",
-            bnb_4bit_use_double_quant=True
-        )
-
-        logger.info("Loading Qwen-Image-Edit-2509 using NF4 quantization (Direct kwargs)...")
-        
-        # We run this in a thread to not block the event loop
         pipe = await asyncio.to_thread(
             QwenImageEditPlusPipeline.from_pretrained,
             "Qwen/Qwen-Image-Edit-2509",
-            quantization_config=quant_config, # Start with this, if it fails then we fallback to kwargs
             torch_dtype=torch.float16,
-            device_map="auto"
+            device_map="auto",
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_use_double_quant=True
         )
         
         pipeline = pipe
@@ -88,9 +80,6 @@ async def load_model_bg():
     except Exception as e:
         logger.error(f"Failed to load model: {e}")
         model_status = "failed"
-
-    # NOTE: If the above fails AGAIN with the same error, we will swap to this logic dynamically or user can instruct:
-    # pipe = QwenImageEditPlusPipeline.from_pretrained(..., load_in_4bit=True, ...)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -128,7 +117,7 @@ async def edit_smile(image: UploadFile = File(...), style: str = Form(...)):
              raise HTTPException(status_code=500, detail="Model failed to load. Check logs.")
          return JSONResponse(status_code=503, content={"detail": "Model is loading. Please wait."})
 
-    if style not in STYLE_TEXT_PROMPTS: # Flexible if image missing
+    if style not in STYLE_TEXT_PROMPTS: 
         raise HTTPException(status_code=400, detail="Invalid style")
 
     try:
@@ -138,7 +127,6 @@ async def edit_smile(image: UploadFile = File(...), style: str = Form(...)):
 
         prompt = STYLE_TEXT_PROMPTS[style]
         
-        # Prepare inputs
         inputs = {
             "prompt": prompt,
             "negative_prompt": NEGATIVE_PROMPT,
@@ -147,11 +135,9 @@ async def edit_smile(image: UploadFile = File(...), style: str = Form(...)):
             "image_guidance_scale": 1.6
         }
 
-        # Handle Reference Image
         if style in REFERENCE_IMAGES:
              inputs["image"] = [input_image, REFERENCE_IMAGES[style]]
         else:
-             logger.warn(f"Missing reference image for {style}, using single image input")
              inputs["image"] = [input_image]
 
         logger.info(f"Processing image with style: {style}")
