@@ -9,3 +9,5 @@ python-multipart
 pillow
 scipy
 safetensors
+opencv-python-headless
+numpy
