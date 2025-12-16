@@ -59,13 +59,13 @@ async def load_model_bg():
         # This bypasses the 'PipelineQuantizationConfig' type check in some diffusers versions
         # by letting the underlying model loader handle it via **kwargs.
         
-        logger.info("Loading Qwen-Image-Edit-2509 using NF4 quantization (Implicit kwargs)...")
+        logger.info("Loading Qwen-Image-Edit-2509 using NF4 quantization (Implicit kwargs + Balanced Map)...")
         
         pipe = await asyncio.to_thread(
             QwenImageEditPlusPipeline.from_pretrained,
             "Qwen/Qwen-Image-Edit-2509",
             torch_dtype=torch.float16,
-            device_map="auto",
+            device_map="balanced", # Changed from "auto" to "balanced"
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
             bnb_4bit_compute_dtype=torch.float16,
