@@ -3,19 +3,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, JSONResponse
 from contextlib import asynccontextmanager
 import torch
-from diffusers import QwenImageEditPlusPipeline
-from PIL import Image
+from diffusers import StableDiffusionInstructPix2PixPipeline, EulerAncestralDiscreteScheduler
+from PIL import Image, ImageOps
 import io
 import logging
 import asyncio
-import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-# Create offload directory for accelerate
-os.makedirs("offload", exist_ok=True)
 
 pipeline = None
 model_status = "starting" # starting, loading, ready, failed
@@ -31,31 +27,26 @@ def get_device():
 async def load_model_bg():
     global pipeline, model_status
     device = get_device()
-    logger.info(f"Background loading started. Target device context: {device}")
+    logger.info(f"Background loading started on {device}...")
     model_status = "loading"
     try:
-        # Define loading args
-        # device_map="auto" handles loading large models by utilizing all available RAM/GPU and offloading to disk if needed
-        kwargs = {
-            "torch_dtype": torch.float16 if device != "cpu" else torch.float32,
-            "low_cpu_mem_usage": True,
-            "device_map": "auto", 
-            "offload_folder": "./offload"
-        }
+        # Load InstructPix2Pix
+        model_id = "timbrooks/instruct-pix2pix"
         
         # Run synchronous loading in a separate thread
         pipe = await asyncio.to_thread(
-            QwenImageEditPlusPipeline.from_pretrained,
-            "Qwen/Qwen-Image-Edit-2509", 
-            **kwargs
+            StableDiffusionInstructPix2PixPipeline.from_pretrained,
+            model_id,
+            torch_dtype=torch.float16 if device != "cpu" else torch.float32,
+            safety_checker=None 
         )
         
-        # Note: With device_map="auto", we do NOT need to call pipe.to() or enable_model_cpu_offload()
-        # Accelerate has already placed layers optimally.
+        pipe.to(device)
+        pipe.scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
         
         pipeline = pipe
         model_status = "ready"
-        logger.info("Model loaded successfully and ready to serve.")
+        logger.info(f"Model {model_id} loaded successfully and ready to serve.")
     except Exception as e:
         logger.error(f"Failed to load model: {e}")
         model_status = "failed"
@@ -79,9 +70,9 @@ app.add_middleware(
 )
 
 STYLE_PROMPTS = {
-    "hollywood": "A person with a perfect bright white hollywood smile showing teeth",
-    "natural": "A person with a natural clean healthy smile showing teeth",
-    "alignment": "A person with perfectly aligned teeth smile"
+    "hollywood": "make his/her teeth look like a perfect bright white hollywood smile",
+    "natural": "make the teeth look clean, healthy and natural white",
+    "alignment": "make the teeth perfectly aligned and straight"
 }
 
 @app.post("/edit-smile")
@@ -103,14 +94,16 @@ async def edit_smile(image: UploadFile = File(...), style: str = Form(...)):
         contents = await image.read()
         input_image = Image.open(io.BytesIO(contents)).convert("RGB")
         
+        # Resize if too large to ensure speed/memory safety
+        input_image = ImageOps.contain(input_image, (1024, 1024))
+
         prompt = STYLE_PROMPTS[style]
         
         inputs = {
-            "image": [input_image],
             "prompt": prompt,
-            "negative_prompt": "bad teeth, rotten teeth, closed mouth, blur, distortion",
-            "num_inference_steps": 30,
-            "guidance_scale": 7.0,
+            "image": input_image,
+            "num_inference_steps": 20, 
+            "image_guidance_scale": 1.5,
         }
         
         logger.info(f"Processing image with style: {style}")

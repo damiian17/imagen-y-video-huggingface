@@ -9,6 +9,3 @@ python-multipart
 pillow
 scipy
 safetensors
-sentencepiece
-protobuf
-bitsandbytes
