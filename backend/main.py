@@ -4,6 +4,7 @@ from fastapi.responses import Response, JSONResponse
 from contextlib import asynccontextmanager
 import torch
 from diffusers import QwenImageEditPlusPipeline
+from transformers import BitsAndBytesConfig
 from PIL import Image
 import io
 import logging
@@ -30,10 +31,17 @@ async def load_model_bg():
     logger.info(f"Background loading started on {device}...")
     model_status = "loading"
     try:
+        # Define quantization config
+        quant_config = BitsAndBytesConfig(
+            load_in_8bit=True,
+            llm_int8_enable_fp32_cpu_offload=True
+        )
+
         # Define loading args
         kwargs = {
             "torch_dtype": torch.float16 if device != "cpu" else torch.float32,
-            "low_cpu_mem_usage": True, 
+            "low_cpu_mem_usage": True,
+            "quantization_config": quant_config,
         }
         
         # Run synchronous loading in a separate thread
@@ -44,6 +52,7 @@ async def load_model_bg():
         )
         
         # Use CPU Offload for memory efficiency if on CUDA
+        # Note: quantization typically handles device placement, but cpu offload ensures layers stay in CPU if GPU is full
         if device == "cuda":
             logger.info("Enabling model CPU offload for memory efficiency...")
             pipe.enable_model_cpu_offload()
