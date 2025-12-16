@@ -9,6 +9,7 @@ import io
 import logging
 import asyncio
 import os
+import traceback
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -64,7 +65,7 @@ async def load_model_bg():
             QwenImageEditPlusPipeline.from_pretrained,
             "Qwen/Qwen-Image-Edit-2509",
             torch_dtype=torch.float16,
-            device_map="balanced", # Changed from 'auto' to 'balanced'
+            device_map="balanced", 
             load_in_8bit=True
         )
         
@@ -128,12 +129,13 @@ async def edit_smile(image: UploadFile = File(...), style: str = Form(...)):
             "negative_prompt": NEGATIVE_PROMPT,
             "num_inference_steps": 30,
             "guidance_scale": 4.5,
-            "image_guidance_scale": 1.6
+            # "image_guidance_scale": 1.6 # REMOVED: Not supported by current pipeline version
         }
 
         if style in REFERENCE_IMAGES:
              inputs["image"] = [input_image, REFERENCE_IMAGES[style]]
         else:
+             logger.warning(f"WARN: Reference image missing for {style}")
              inputs["image"] = [input_image]
 
         logger.info(f"Processing image with style: {style}")
@@ -147,8 +149,9 @@ async def edit_smile(image: UploadFile = File(...), style: str = Form(...)):
         return Response(content=img_byte_arr.getvalue(), media_type="image/png")
 
     except Exception as e:
-        logger.error(f"Error processing image: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = traceback.format_exc()
+        logger.error(f"Error processing image: {error_msg}")
+        raise HTTPException(status_code=500, detail=f"Internal Error: {str(e)} | Trace: {error_msg}")
 
 @app.get("/")
 def health():
