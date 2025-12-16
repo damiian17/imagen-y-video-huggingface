@@ -8,6 +8,7 @@ from PIL import Image
 import io
 import logging
 import asyncio
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -30,13 +31,22 @@ async def load_model_bg():
     logger.info(f"Background loading started on {device}...")
     model_status = "loading"
     try:
-        # Run synchronous loading in a separate thread to not block the event loop
+        # Define loading args
+        kwargs = {
+            "torch_dtype": torch.float16 if device != "cpu" else torch.float32,
+            "low_cpu_mem_usage": True, # Optimize memory loading
+        }
+        
+        # Run synchronous loading in a separate thread
         pipe = await asyncio.to_thread(
             QwenImageEditPlusPipeline.from_pretrained,
             "Qwen/Qwen-Image-Edit-2509", 
-            torch_dtype=torch.float16 if device != "cpu" else torch.float32
+            **kwargs
         )
+        
+        # Move to device
         pipe.to(device)
+        
         pipeline = pipe
         model_status = "ready"
         logger.info("Model loaded successfully and ready to serve.")
@@ -75,7 +85,6 @@ async def edit_smile(image: UploadFile = File(...), style: str = Form(...)):
     if model_status != "ready":
         if model_status == "failed":
              raise HTTPException(status_code=500, detail="Model failed to load. Check server logs.")
-        # Return 503 so frontend (or user) knows to retry
         return JSONResponse(
             status_code=503, 
             content={"detail": "Model is still loading. Please try again in 1-2 minutes."}
