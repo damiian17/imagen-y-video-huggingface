@@ -4,15 +4,18 @@ from fastapi.responses import Response, JSONResponse
 from contextlib import asynccontextmanager
 import torch
 from diffusers import QwenImageEditPlusPipeline
-from transformers import BitsAndBytesConfig
 from PIL import Image
 import io
 import logging
 import asyncio
+import os
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Create offload directory for accelerate
+os.makedirs("offload", exist_ok=True)
 
 pipeline = None
 model_status = "starting" # starting, loading, ready, failed
@@ -28,20 +31,16 @@ def get_device():
 async def load_model_bg():
     global pipeline, model_status
     device = get_device()
-    logger.info(f"Background loading started on {device}...")
+    logger.info(f"Background loading started. Target device context: {device}")
     model_status = "loading"
     try:
-        # Define quantization config
-        quant_config = BitsAndBytesConfig(
-            load_in_8bit=True,
-            llm_int8_enable_fp32_cpu_offload=True
-        )
-
         # Define loading args
+        # device_map="auto" handles loading large models by utilizing all available RAM/GPU and offloading to disk if needed
         kwargs = {
             "torch_dtype": torch.float16 if device != "cpu" else torch.float32,
             "low_cpu_mem_usage": True,
-            "quantization_config": quant_config,
+            "device_map": "auto", 
+            "offload_folder": "./offload"
         }
         
         # Run synchronous loading in a separate thread
@@ -51,13 +50,8 @@ async def load_model_bg():
             **kwargs
         )
         
-        # Use CPU Offload for memory efficiency if on CUDA
-        # Note: quantization typically handles device placement, but cpu offload ensures layers stay in CPU if GPU is full
-        if device == "cuda":
-            logger.info("Enabling model CPU offload for memory efficiency...")
-            pipe.enable_model_cpu_offload()
-        else:
-            pipe.to(device)
+        # Note: With device_map="auto", we do NOT need to call pipe.to() or enable_model_cpu_offload()
+        # Accelerate has already placed layers optimally.
         
         pipeline = pipe
         model_status = "ready"
